@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PharmaTrack</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f4f7fa; color: #222; }
+  header { background: #1f4e79; color: #fff; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 24px; }
+  header p { margin: 4px 0 0; opacity: .85; font-size: 14px; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 24px 0; }
+  nav button { border: 0; padding: 10px 14px; background: #dce6f0; cursor: pointer; border-radius: 6px 6px 0 0; font-size: 14px; }
+  nav button.active { background: #fff; font-weight: bold; }
+  main { background: #fff; margin: 0 24px 24px; padding: 20px; border-radius: 0 6px 6px 6px; }
+  section { display: none; }
+  section.active { display: block; }
+  label { display: block; margin: 10px 0 4px; font-size: 14px; }
+  input { padding: 8px; width: 100%; max-width: 320px; box-sizing: border-box; }
+  .go { margin-top: 14px; padding: 10px 18px; background: #1f4e79; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 14px; }
+  th, td { border: 1px solid #ccd6e0; padding: 8px; text-align: left; }
+  th { background: #dce6f0; }
+  .status-expired td { background: #fde2e2; }
+  .status-expiring-soon td { background: #fff3cd; }
+  .danger { background: #c0392b; color: #fff; border: 0; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 6px; display: none; }
+  #message.error { display: block; background: #fde2e2; color: #8a1c1c; }
+  #message.success { display: block; background: #dff3e0; color: #1d5e20; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PharmaTrack</h1>
+  <p>Batch-level medicine inventory and expiry control</p>
+</header>
+
+<!-- Menu: one tab per option from the plan card (Exit is not needed on a website). -->
+<nav id="tabs">
+  <button data-tab="add" class="active">Add Stock</button>
+  <button data-tab="sell">Sell Medicine</button>
+  <button data-tab="expiring">Expiring in 30 Days</button>
+  <button data-tab="low">Low Stock</button>
+  <button data-tab="inventory">Inventory</button>
+</nav>
+
+<main>
+  <section id="add" class="active">
+    <h2>Add Medicine Stock by Batch</h2>
+    <form id="addForm">
+      <label>Medicine ID</label><input id="a_id" required>
+      <label>Medicine name</label><input id="a_name" required>
+      <label>Batch number</label><input id="a_batch" required>
+      <label>Expiry date</label><input id="a_expiry" type="date" required>
+      <label>Quantity</label><input id="a_qty" type="number" required>
+      <label>Reorder level</label><input id="a_reorder" type="number" required>
+      <button class="go" type="submit">Add Batch</button>
+    </form>
+  </section>
+
+  <section id="sell">
+    <h2>Sell Medicine</h2>
+    <form id="sellForm">
+      <label>Medicine ID</label><input id="s_id" required>
+      <label>Quantity</label><input id="s_qty" type="number" required>
+      <button class="go" type="submit">Sell</button>
+    </form>
+  </section>
+
+  <section id="expiring">
+    <h2>Batches Expiring Within 30 Days</h2>
+    <div id="expiringTable"></div>
+  </section>
+
+  <section id="low">
+    <h2>Low-Stock Medicines</h2>
+    <div id="lowTable"></div>
+  </section>
+
+  <section id="inventory">
+    <h2>Medicine Inventory</h2>
+    <div id="inventoryTable"></div>
+  </section>
+
+  <!-- One shared box for success / error messages -->
+  <div id="message"></div>
+</main>
+
+<script>
+// ---------- Small helpers ----------
+
+const messageBox = document.getElementById('message');
+
+// Shows a green (success) or red (error) message under the content.
+function showMessage(text, isError) {
+  messageBox.textContent = text;            // textContent (not innerHTML) so user text can't inject HTML
+  messageBox.className = isError ? 'error' : 'success';
+}
+function clearMessage() {
+  messageBox.textContent = '';
+  messageBox.className = '';
+}
+
+// Talks to the Java backend. fetch() returns a Promise; "await" waits for the answer.
+// If the server replies with an error status (400), we throw an Error carrying the server's message.
+async function api(path, options) {
+  const response = await fetch('/api' + path, options);
+  let data = null;
+  try { data = await response.json(); } catch (e) { /* response had no JSON body */ }
+  if (!response.ok) {
+    throw new Error((data && data.error) || 'Request failed (' + response.status + ')');
+  }
+  return data;
+}
+
+// Sends a POST request with a JSON body.
+function postJson(path, body) {
+  return api(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+}
+
+// Reads the text of an input box by id.
+function val(id) { return document.getElementById(id).value; }
+
+// Builds a table from data. columns = [{title, value: item => text}], rowClass = item => css class.
+function renderTable(containerId, columns, items, rowClass) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  if (items.length === 0) {
+    container.textContent = 'Nothing to show.';
+    return;
+  }
+  const table = document.createElement('table');
+  const headRow = table.insertRow();
+  columns.forEach(c => {
+    const th = document.createElement('th');
+    th.textContent = c.title;
+    headRow.appendChild(th);
+  });
+  items.forEach(item => {
+    const row = table.insertRow();
+    if (rowClass) row.className = rowClass(item);
+    columns.forEach(c => {
+      const cell = row.insertCell();
+      if (c.button) {
+        // Action column: draw a button instead of text. Clicking it runs the function we passed in.
+        const btn = document.createElement('button');
+        btn.textContent = c.button.label;
+        btn.className = 'danger';
+        btn.addEventListener('click', () => c.button.onClick(item));
+        cell.appendChild(btn);
+      } else {
+        cell.textContent = c.value(item);
+      }
+    });
+  });
+  container.appendChild(table);
+}
+
+// "EXPIRING SOON" -> "status-expiring-soon" (used for row colours)
+function statusClass(batch) {
+  return 'status-' + batch.status.toLowerCase().replace(' ', '-');
+}
+
+// ---------- Loading data for each tab ----------
+
+const batchColumns = [
+  { title: 'Medicine ID',  value: b => b.medicineId },
+  { title: 'Medicine',     value: b => b.medicineName },
+  { title: 'Batch',        value: b => b.batchNumber },
+  { title: 'Expiry date',  value: b => b.expiryDate },
+  { title: 'Days left',    value: b => b.daysLeft },
+  { title: 'Quantity',     value: b => b.quantity },
+  { title: 'Reorder level',value: b => b.reorderLevel },
+  { title: 'Status',       value: b => b.status }
+];
+
+async function loadExpiring() {
+  try {
+    const batches = await api('/batches/expiring');
+    renderTable('expiringTable', batchColumns, batches, statusClass);
+    if (batches.length > 0) showMessage(batches.length + ' batch(es) expiring within 30 days!', true);
+  } catch (err) { showMessage(err.message, true); }
+}
+
+async function loadLow() {
+  try {
+    const items = await api('/medicines/low-stock');
+    renderTable('lowTable', [
+      { title: 'Medicine ID',   value: i => i.medicineId },
+      { title: 'Medicine',      value: i => i.medicineName },
+      { title: 'Usable stock',  value: i => i.totalStock },
+      { title: 'Reorder level', value: i => i.reorderLevel }
+    ], items);
+  } catch (err) { showMessage(err.message, true); }
+}
+
+// Inventory = the normal columns + a Delete button column.
+const inventoryColumns = batchColumns.concat([
+  { title: 'Action', button: { label: 'Delete', onClick: b => deleteBatch(b) } }
+]);
+
+async function loadInventory() {
+  try {
+    const batches = await api('/batches');
+    renderTable('inventoryTable', inventoryColumns, batches, statusClass);
+  } catch (err) { showMessage(err.message, true); }
+}
+
+// Asks for confirmation (deleting is permanent), calls DELETE /api/batches/{id}, then reloads the table.
+async function deleteBatch(b) {
+  const ok = confirm('Delete batch ' + b.batchNumber + ' of ' + b.medicineName
+    + ' (' + b.quantity + ' units)? This cannot be undone.');
+  if (!ok) return;
+  try {
+    await api('/batches/' + b.id, { method: 'DELETE' });
+    showMessage('Deleted batch ' + b.batchNumber + '.', false);
+    loadInventory();
+  } catch (err) { showMessage(err.message, true); }
+}
+
+// ---------- Tabs ----------
+
+const loaders = { add: null, sell: null, expiring: loadExpiring, low: loadLow, inventory: loadInventory };
+
+function showTab(name) {
+  clearMessage();
+  document.querySelectorAll('section').forEach(s => s.classList.toggle('active', s.id === name));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  if (loaders[name]) loaders[name]();      // list tabs fetch fresh data every time they open
+}
+
+document.querySelectorAll('#tabs button').forEach(b => {
+  b.addEventListener('click', () => showTab(b.dataset.tab));
+});
+
+// ---------- Forms ----------
+
+document.getElementById('addForm').addEventListener('submit', async (e) => {
+  e.preventDefault();                       // stop the browser's normal page reload
+  try {
+    const saved = await postJson('/batches', {
+      medicineId: val('a_id'),
+      medicineName: val('a_name'),
+      batchNumber: val('a_batch'),
+      expiryDate: val('a_expiry'),          // already "YYYY-MM-DD" from the date input
+      quantity: parseInt(val('a_qty'), 10),
+      reorderLevel: parseInt(val('a_reorder'), 10)
+    });
+    showMessage('Added batch ' + saved.batchNumber + ' of ' + saved.medicineName + '.', false);
+    e.target.reset();
+  } catch (err) { showMessage(err.message, true); }
+});
+
+document.getElementById('sellForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const result = await postJson('/sell', {
+      medicineId: val('s_id'),
+      quantity: parseInt(val('s_qty'), 10)
+    });
+    showMessage('Sold ' + result.totalSold + ' units of ' + result.medicineId + ' -> ' + result.details.join(', '), false);
+    e.target.reset();
+  } catch (err) { showMessage(err.message, true); }
+});
+</script>
+</body>
+</html>
