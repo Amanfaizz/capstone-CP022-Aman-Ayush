@@ -1,28 +1,62 @@
-# PharmaTrack: Batch-Level Medicine Inventory and Expiry Control System
+# PharmaTrack (CP-022)
 
-**Problem Title:** PharmaTrack: Batch-Level Medicine Inventory and Expiry Control System
+Batch-level medicine inventory and expiry control system. A menu-driven console application written in Python.
 
-**Problem ID:** CP-022
+**Team:** Aman Faizan (AT24CS016), Ayush (1AT24CS032)
 
-## Team Members
-1. Aman Faizan — 1AT24CS016
-2. Ayush — 1AT24CS032
+## Problem
 
-## How To Run The Program
+Pharmacies lose money to expired medicines and risk selling them by mistake. PharmaTrack tracks stock batch by batch and always sells the batch that expires first.
 
-### Prerequisites
-- Install the programming language compiler or runtime required for your track.
+## How to run
 
-### Steps
-1. Clone the repository:
-   ```bash
-   git clone <your-repository-url>
-   ```
-2. Navigate to the project folder:
-   ```bash
-   cd PharmaTrack
-   ```
-3. Compile and run the program using the commands for your programming language.
+Requires Python 3.8 or higher. No external libraries are needed.
 
-## Project Description
-PharmaTrack is a menu-driven console application designed to manage medicine inventory at the batch level. It supports medicine stock entry, First-Expiry-First-Out (FEFO) stock handling, expiry alerts, low-stock monitoring, and prevention of expired medicine sales.
+```
+python pharmatrack.py
+```
+
+## Menu
+
+1. Add Medicine Stock by Batch
+2. Sell Medicine
+3. View Batches Expiring Within 30 Days
+4. Show Low-Stock Medicines
+5. View Medicine Inventory
+6. Exit
+
+## Data stored for each batch
+
+Medicine ID, medicine name, batch number, expiry date, quantity available, reorder level.
+
+## Core features
+
+1. **Add stock by batch** with expiry date and quantity.
+2. **Sell** a requested quantity, taking stock from the batch that expires first.
+3. **Expiry alert** for batches expiring within 30 days.
+4. **Low-stock report** for medicines whose total stock is below the reorder level.
+5. **Expired batch block**: an expired batch can never be sold.
+
+## What can go wrong, and how it is handled
+
+| Feature | Case | Handling |
+|---|---|---|
+| Add stock | Duplicate batch number | Rejected with an error message |
+| Add stock | Negative, zero or non-numeric quantity | Rejected |
+| Add stock | Invalid expiry date (e.g. `2027-02-30`, `abc`) | Rejected; format must be `YYYY-MM-DD` |
+| Sell | Quantity more than available stock | Rejected; shows how many units are available |
+| Sell | Wrong batch selected | Batches are sorted by expiry date, earliest first |
+| Sell | Invalid quantity (0, negative, text) | Rejected |
+| Sell | Expired batch sold | Expired batches are never included in a sale |
+| Expiry alert | Batch within 30 days not shown | Shows every batch from today up to 30 days ahead |
+| Expiry alert | Expired or wrongly dated batch classified incorrectly | One function decides the status: OK, EXPIRING SOON or EXPIRED |
+| Low stock | Wrong total across batches | Adds up all non-expired batches of the medicine |
+| Low stock | Medicine above reorder level flagged | Flagged only if total is strictly below the reorder level |
+
+## Design decisions
+
+- Expired stock is not counted as available stock, in sales or in the low-stock report.
+- A batch that expires today can still be sold today; it is marked EXPIRING SOON.
+- Already-expired batches can be added (with a warning) so that the expired-batch block can be demonstrated.
+- When a new batch is added for an existing medicine, its name and reorder level are reused, so one medicine never has two reorder levels.
+- Data is kept in memory and is cleared when the program exits.
